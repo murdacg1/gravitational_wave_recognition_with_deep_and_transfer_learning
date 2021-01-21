@@ -1,0 +1,1046 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "yGOeCl1pVrjE"
+   },
+   "source": [
+    "**Gravitational Wave Classification using Convolutional Neural Networks (CNNs)**"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "6pYifz_oYpGp"
+   },
+   "source": [
+    "**Introduction**\n",
+    "\n",
+    "Gravitational Waves (GWs) have recently been observed from binary coalescences of condensed objects (black holes, BHs; neutron stars, NSs). The observations are inherently noisy, with many local noise sources. Thus, a coincident detection approach is useful. Currently, three detectors are in operation: LIGO's (Laser Interferometer Gravitational-Wave Observatory) Hanford and Louisiana detectors in the US, and the Virgo detector in Italy. Here, we present data from the two LIGO detectors. Thus, the data can be assembled in the form of two channels, one from each LIGO detector. In addition, the data, in the form of strain (on the order of fractions of an atomic nuclues, i.e., fractions of a femtometer, 1e-15 m) in the 2 km arms of the laser interferometer detectors, is recorded as a function of frequency (39 frequencies) and time (100 time intervals). Thus, the data can naturally be assembled in the form of a tensor object of size (data_measurments, frequencies=39, time_intervals=100, detector_channels=2). For weak signals (i.e. distant or relatively small BH or NS mass objects), it is not obvious if the data indicate an event or just noise. We present here data consisting of 1568 gravitational wave (GW) events and 1216 nondetection (ND) events (total: 2784), a binary classification problem. The data will be randomized and split as 15-15-70% for test, validation, and training.\n",
+    "\n",
+    "Why are we so concerned with quickly determining if a potential event is a true GW event? The reason is that some of these events may also produce radiation which quickly fades. Thus, to further advance the understanding of such extreme astrophysical phenomenon, it is essential to quickly identify true positive GWs and point other instruments (e.g., radio, visible, UV, and x-ray telescopes) in the appropriate direction to observe fast events following the BH/NS collisions.\n",
+    "\n",
+    "In the initial part of this project, we have followed the approach and use the data of Michel Kana (see https://github.com/michelkana/Deep-learning-projects), as also described in a Medium article (https://medium.com/swlh/gravitational-waves-explained-83ce37617ab2) and a Toward Data Science article (https://towardsdatascience.com/2020-how-a-i-could-help-astronomers-sorting-big-data-811571705707). We both intially implement a CIFAR-10 type of CNN classifier (with dropout). Whereas Kana stops at 60 epochs, we continue to 75. However, this still does not stabilize the validation data curves with epoch (accuracy or loss), and neither does use of a learning rate smaller by a factor of ten. Thus, we extend past Kana's approach and use transfer learning with a VGG-16 base and a trained binary classifier, which is shown to give exceptionally good performance with minimal effort, despite the rather different types of data introduced here compared to what was used to train VGG-16. This again confirms the power of transfer learning and its applicability across diverse fields.  "
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "_3JWiNsKiEfG"
+   },
+   "source": [
+    "**Data overview**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "Cs-wSBhBQv8s",
+    "outputId": "a1488c79-8380-494e-b3a8-7f179ba8eb2d"
+   },
+   "outputs": [],
+   "source": [
+    "from google.colab import drive\n",
+    "drive.mount('/content/drive')\n",
+    "\n",
+    "import sys\n",
+    "sys.path.append('/content/drive/My Drive/dlpython/Project3')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "HR9SfDDnRz9f",
+    "outputId": "52b100d5-8040-4dda-ebd3-541c0be56d13"
+   },
+   "outputs": [],
+   "source": [
+    "import matplotlib.pyplot as plt\n",
+    "%matplotlib inline\n",
+    "import numpy as np\n",
+    "from random import seed\n",
+    "from random import randint\n",
+    "import seaborn as sns\n",
+    "\n",
+    "seed(30)\n",
+    "\n",
+    "GW = np.load('/content/drive/My Drive/dlpython/Project3/data/GW_aug.npy')\n",
+    "ND = np.load('/content/drive/My Drive/dlpython/Project3/data/ND_aug.npy')\n",
+    "GW.shape, ND.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "gHTuZVUxQv8v"
+   },
+   "outputs": [],
+   "source": [
+    "def plot_event(event=0, data=GW): \n",
+    "    fig, ax = plt.subplots(1,2,figsize=(5,5))\n",
+    "    ax[0].imshow(data[event,:,:,0])\n",
+    "    ax[0].set_title('Event {} - H1'.format(event))\n",
+    "    ax[1].imshow(data[event,:,:,1])\n",
+    "    ax[1].set_title('Event {} - L1'.format(event));"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 497
+    },
+    "id": "ceUIcMORQv8w",
+    "outputId": "c36bf4bd-3d6a-4f52-812c-13aa1bcfc2b4"
+   },
+   "outputs": [],
+   "source": [
+    "for e in range(5):\n",
+    "    e = randint(0, GW.shape[0])\n",
+    "    plot_event(e)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 497
+    },
+    "id": "JIEvBYPmQv8x",
+    "outputId": "6ce7ba6d-2474-452c-cb3d-cd4789e48cd7"
+   },
+   "outputs": [],
+   "source": [
+    "for e in range(5):\n",
+    "    e = randint(0, ND.shape[0])\n",
+    "    plot_event(e, data=ND)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 427
+    },
+    "id": "sjpeTwKZQv8y",
+    "outputId": "f76bf994-0be4-41ca-9d38-d208016a9293"
+   },
+   "outputs": [],
+   "source": [
+    "fig, ax = plt.subplots(1,2,figsize=(15,5))\n",
+    "sns.distplot(GW.flatten(), ax=ax[0])\n",
+    "ax[0].set_title('Distribution of frequency powers')\n",
+    "sns.boxplot(np.unique(GW), ax=ax[1])\n",
+    "ax[1].set_title('Distribution of frequency powers');"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 427
+    },
+    "id": "Lp0G1eVHQv8z",
+    "outputId": "f7ec1bea-3c30-42ba-9000-17ecdd094a4a"
+   },
+   "outputs": [],
+   "source": [
+    "fig, ax = plt.subplots(1,2,figsize=(15,5))\n",
+    "sns.distplot(ND.flatten(), ax=ax[0])\n",
+    "ax[0].set_title('Distribution of frequency powers - ND')\n",
+    "sns.boxplot(np.unique(ND), ax=ax[1])\n",
+    "ax[1].set_title('Distribution of frequency powers - ND');"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "cQyOY6nkiVHb"
+   },
+   "source": [
+    "It is seen that the data are broadly similar. There are some outliers in the true GW events."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "fk-6s5xIX2Yn"
+   },
+   "source": [
+    "**Data preprocessing and splitting**\n",
+    "\n",
+    "Now we normalize and split the data."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "CjlNobtGQv80"
+   },
+   "outputs": [],
+   "source": [
+    "GW = GW.astype('float32')/np.max(GW)\n",
+    "ND = ND.astype('float32')/np.max(ND)\n",
+    "\n",
+    "np.random.seed(30)\n",
+    "np.random.shuffle(GW)\n",
+    "np.random.shuffle(ND)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "hbXiAexDQv80",
+    "outputId": "dda6191b-01b1-4206-eca8-da7b539e296c"
+   },
+   "outputs": [],
+   "source": [
+    "X = np.append(GW, ND, axis=0)\n",
+    "Y = np.append(np.ones((GW.shape[0],1)), np.zeros((ND.shape[0],1)), axis=0)\n",
+    "X.shape, Y.shape, GW.shape, ND.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "rApuzMCyQv81"
+   },
+   "outputs": [],
+   "source": [
+    "test_val_idx = np.random.choice(np.arange(0, Y.shape[0], 1), size=round(.3*Y.shape[0]), replace=False)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "Oz61-BWUQv81"
+   },
+   "outputs": [],
+   "source": [
+    "test_idx = np.random.choice(test_val_idx, size=round(.5*test_val_idx.shape[0]), replace=False)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "FIf016uzQv81"
+   },
+   "outputs": [],
+   "source": [
+    "val_idx = np.setdiff1d(test_val_idx, test_idx)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "2XL2YJPLQv81"
+   },
+   "outputs": [],
+   "source": [
+    "train_idx = np.setdiff1d(np.arange(0, Y.shape[0], 1), test_val_idx)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "cFuuVtrNQv81",
+    "outputId": "c36c74b6-1816-430e-eed8-e30a96b7e375"
+   },
+   "outputs": [],
+   "source": [
+    "test_idx.shape, val_idx.shape, train_idx.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "7H5aEFTWQv82",
+    "outputId": "bd039e15-1cec-41d9-fd80-cb25941da371"
+   },
+   "outputs": [],
+   "source": [
+    "test_idx.shape[0]+val_idx.shape[0]+train_idx.shape[0]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "rgOHOVkoQv83",
+    "outputId": "64f19dc8-9b11-460e-b41b-28941bc23c4d"
+   },
+   "outputs": [],
+   "source": [
+    "np.intersect1d(test_idx, val_idx)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "kprr_0ZrQv83",
+    "outputId": "a25e04ce-6338-4c9d-9dd3-72124171d1c9"
+   },
+   "outputs": [],
+   "source": [
+    "np.intersect1d(val_idx, train_idx)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "Coj_eyRHQv84",
+    "outputId": "0fef93b1-fb49-4e11-962c-4e438d638356"
+   },
+   "outputs": [],
+   "source": [
+    "np.intersect1d(test_idx, train_idx)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "RBH1hwUcQv84",
+    "outputId": "9ae35e90-3d96-4d08-f1b3-69e4a994332f"
+   },
+   "outputs": [],
+   "source": [
+    "print(np.amin(test_idx), np.amax(test_idx)) "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "6nPSqSiMQv85",
+    "outputId": "1bbbf6b2-a101-49e5-c688-cabc327fb2d5"
+   },
+   "outputs": [],
+   "source": [
+    "print(np.amin(val_idx), np.amax(val_idx)) "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "SQyUSf9AQv86",
+    "outputId": "e4794907-fc5f-4ed4-f45b-52b88a4020a5"
+   },
+   "outputs": [],
+   "source": [
+    "print(np.amin(train_idx), np.amax(train_idx))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "oaIvhKX_Qv87"
+   },
+   "outputs": [],
+   "source": [
+    "X_test = X[test_idx]\n",
+    "y_test = Y[test_idx]\n",
+    "X_val = X[val_idx]\n",
+    "y_val = Y[val_idx]\n",
+    "X_train = X[train_idx]\n",
+    "y_train = Y[train_idx]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "lReVuaCPQv87",
+    "outputId": "7335b9cf-0250-4d00-8854-b6c078cd4b6d"
+   },
+   "outputs": [],
+   "source": [
+    "print(X_test.shape, y_test.shape, X_val.shape, y_val.shape, X_train.shape, y_train.shape)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "fClQoeuDQv87",
+    "outputId": "a5c147d7-0f35-4074-ed92-92c21be89eb7"
+   },
+   "outputs": [],
+   "source": [
+    "np.unique(y_test), np.unique(y_val), np.unique(y_train)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "jcpyBiDFYH2I"
+   },
+   "source": [
+    "**Methods and Results**"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "bicUWn1WiuRy"
+   },
+   "source": [
+    "**1. Construct the CNN: First replicate Kana's CIFAR-10 - style CNN**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "DMlloBzZQv88"
+   },
+   "outputs": [],
+   "source": [
+    "#  tensorflow library provides functions for deep neural networks \n",
+    "import tensorflow as tf\n",
+    "# for reproducibility \n",
+    "from numpy.random import seed\n",
+    "seed(30)\n",
+    "# tf.random.set_seed(30)\n",
+    "\n",
+    "#  to get a text report showing the main classification metrics for each class\n",
+    "from sklearn.metrics import classification_report"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "kAUPdpWgQv8_"
+   },
+   "outputs": [],
+   "source": [
+    "def create_cnn(input_shape=X_train.shape[1:], nb_classes=1, nb_blocks=3, nb_filters=32, filter_size=(3,3), \n",
+    "               pool_size=(2,2), weight_decay=1e-4, padding='same', dropout=.2, output_activation='softmax'):\n",
+    "\n",
+    "    model = tf.keras.models.Sequential()\n",
+    "\n",
+    "    for i in range(nb_blocks):\n",
+    "        if i==0:\n",
+    "            model.add(tf.keras.layers.Conv2D(nb_filters, filter_size, activation='relu', padding=padding, kernel_regularizer=tf.keras.regularizers.l2(weight_decay), input_shape=input_shape))\n",
+    "        else:\n",
+    "            model.add(tf.keras.layers.Conv2D(nb_filters, filter_size, activation='relu', padding=padding, kernel_regularizer=tf.keras.regularizers.l2(weight_decay)))        \n",
+    "        model.add(tf.keras.layers.BatchNormalization())\n",
+    "        model.add(tf.keras.layers.Conv2D(nb_filters, filter_size, activation='relu', padding=padding, kernel_regularizer=tf.keras.regularizers.l2(weight_decay)))\n",
+    "        model.add(tf.keras.layers.BatchNormalization())\n",
+    "        model.add(tf.keras.layers.MaxPooling2D(pool_size=pool_size))\n",
+    "        model.add(tf.keras.layers.Dropout(dropout))\n",
+    "\n",
+    "    model.add(tf.keras.layers.Flatten())\n",
+    "    model.add(tf.keras.layers.Dense(nb_classes, activation=output_activation))\n",
+    "\n",
+    "    return model"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "kJPGhNF2Qv8_",
+    "outputId": "bb8177a9-9863-4f2f-bbef-8592f1964c0c"
+   },
+   "outputs": [],
+   "source": [
+    "model = create_cnn(input_shape=X_train.shape[1:], nb_classes=1, nb_blocks=2, \n",
+    "                    nb_filters=32, weight_decay=1e-4, padding='same', dropout=.3, output_activation='sigmoid')\n",
+    "model.summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 1000
+    },
+    "id": "7Uyp9WKCQv9A",
+    "outputId": "e8623ef2-038d-4004-81f5-291ad0807093"
+   },
+   "outputs": [],
+   "source": [
+    "# plot the graph  of the model and save to file\n",
+    "tf.keras.utils.plot_model(\n",
+    "    model,\n",
+    "    to_file='model.png', show_shapes=True, show_layer_names=True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "oM1PJe4PMICr"
+   },
+   "outputs": [],
+   "source": [
+    "def plot_history(history):\n",
+    "    \n",
+    "    import pandas as pd\n",
+    "    import matplotlib.pyplot as plt\n",
+    "    import tensorflow\n",
+    "    \n",
+    "    #-----------------------------------------------------------\n",
+    "    # Retrieve results on training and validation data sets\n",
+    "    # for each training epoch\n",
+    "    #-----------------------------------------------------------\n",
+    "    \n",
+    "    # check the current version\n",
+    "    if int(tensorflow.__version__.split('.')[0]) > 1:\n",
+    "        acc_key = 'accuracy'\n",
+    "    else:\n",
+    "        acc_key = 'acc'\n",
+    "        \n",
+    "    acc      = history.history[acc_key]\n",
+    "    val_acc  = history.history['val_' + acc_key]\n",
+    "    loss     = history.history['loss']\n",
+    "    val_loss = history.history['val_loss']\n",
+    "    epochs   = range(1,len(acc)+1) \n",
+    "    \n",
+    "    plt.rcParams['font.size'] = 16\n",
+    "    plt.rcParams['axes.spines.right'] = False\n",
+    "    plt.rcParams['axes.spines.top'] = False\n",
+    "\n",
+    "    fig, (ax1, ax2) = plt.subplots(1,2,figsize=(10,5))\n",
+    "    \n",
+    "    #------------------------------------------------\n",
+    "    # Plot training and validation accuracy per epoch\n",
+    "    #------------------------------------------------\n",
+    "    ax1.plot(epochs, acc,  label='Training accuracy')\n",
+    "    ax1.plot(epochs, val_acc,  label='Validation accuracy')\n",
+    "    ax1.set_title('Accuracy')\n",
+    "    ax1.set_xlabel('epoch')\n",
+    "    ax1.set_ylabel('accuracy')\n",
+    "    ax1.set_ylim(0.5,1.2)\n",
+    "    \n",
+    "    #------------------------------------------------\n",
+    "    # Plot training and validation loss per epoch\n",
+    "    #------------------------------------------------\n",
+    "\n",
+    "    ax2.plot(epochs, loss,  label='Training Loss')\n",
+    "    ax2.plot(epochs, val_loss,  label='Validation Loss')\n",
+    "    ax2.set_title('Loss')\n",
+    "    ax2.set_xlabel('epoch')\n",
+    "    ax2.set_ylabel('loss')\n",
+    "    ax2.set_ylim(-0.3,3)\n",
+    "    ax2.legend()\n",
+    "\n",
+    "    fig.tight_layout()\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "YN5_tqVzQv9A"
+   },
+   "outputs": [],
+   "source": [
+    "opt_rms = tf.keras.optimizers.RMSprop(lr=0.01, decay=1e-6)\n",
+    "model.compile(loss='binary_crossentropy', optimizer='RMSprop', metrics=['accuracy'])\n",
+    "batch_size = 64\n",
+    "epochs = 75"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "S02sxMgRQv9A",
+    "outputId": "f414e9f1-7ec5-4511-f58c-7647040bdac7"
+   },
+   "outputs": [],
+   "source": [
+    "%%time \n",
+    "\n",
+    "history = model.fit(X_train, y_train, batch_size=batch_size, \n",
+    "                                  epochs=epochs,\n",
+    "                                  verbose=1,\n",
+    "                                  validation_data=(X_val, y_val))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 356
+    },
+    "id": "wHxv5GxgVWWF",
+    "outputId": "a0705bb3-50d6-45af-82de-53bb94be7b4c"
+   },
+   "outputs": [],
+   "source": [
+    "plot_history(history)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "_J-lJRwZYDs4",
+    "outputId": "c8b04cec-3458-4d93-d0ad-c81a4c4dc0ef"
+   },
+   "outputs": [],
+   "source": [
+    "test_loss, test_accuracy = model.evaluate(X_test, y_test, batch_size=128, verbose=2)\n",
+    "print('Accuracy on test dataset:', test_accuracy)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "kLI5yaqYjL8A"
+   },
+   "source": [
+    "After 75 epochs the validation curves have not stabilized stabilized. Let's try a smaller learning rate."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "Lw0YgtTVZEln"
+   },
+   "source": [
+    "**2. Same CNN CIFAR-10 style model, but 10x smaller learning rate**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "g3bGx1ikLa40"
+   },
+   "outputs": [],
+   "source": [
+    "opt_rms = tf.keras.optimizers.RMSprop(lr=0.001, decay=1e-6)\n",
+    "model.compile(loss='binary_crossentropy', optimizer='RMSprop', metrics=['accuracy'])\n",
+    "batch_size = 64\n",
+    "epochs = 75"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "f28pc7JsLnl_",
+    "outputId": "21121f42-97b9-4200-b8f2-2a18651f53f8"
+   },
+   "outputs": [],
+   "source": [
+    "%%time \n",
+    "\n",
+    "history = model.fit(X_train, y_train, batch_size=batch_size, \n",
+    "                                  epochs=epochs,\n",
+    "                                  verbose=1,\n",
+    "                                  validation_data=(X_val, y_val))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 356
+    },
+    "id": "zm2TZkwSLtqZ",
+    "outputId": "4d7978f5-f77e-4cc0-8c7b-72638cabbcda"
+   },
+   "outputs": [],
+   "source": [
+    "plot_history(history)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "eaMl2CHrLyKy",
+    "outputId": "17c3048c-c0db-494c-de6b-dd573f9d4688"
+   },
+   "outputs": [],
+   "source": [
+    "test_loss, test_accuracy = model.evaluate(X_test, y_test, batch_size=128, verbose=2)\n",
+    "print('Accuracy on test dataset:', test_accuracy)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "7hpfPqN1UUJz"
+   },
+   "source": [
+    "While the training curves above are smooth, the extreme variability in the validation curves and the lack of a convergence gives cause for concern. Evidently, the number of epochs run will randomly detemine the performance on validation and test data. We need a better method."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "RHKmGQKkji4_"
+   },
+   "source": [
+    "**3. Transfer earning: VGG-16 (fixed weights) plus a classifier head (trainable weights)**"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "uF3viSPGlMda"
+   },
+   "source": [
+    "Since VGG-16 expects a three-channel input, we will place the average of the two channels in the third channel."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "vWIGylf_nkHn",
+    "outputId": "fd1129f8-d089-41aa-c9f9-d3115a215e79"
+   },
+   "outputs": [],
+   "source": [
+    "print(X_test.shape)\n",
+    "X3_test = np.zeros((X_test.shape[0], X_test.shape[1], X_test.shape[2], X_test.shape[3]+1))\n",
+    "X3_test[..., 0] = X_test[..., 0]\n",
+    "X3_test[..., 1] = X_test[..., 1]\n",
+    "X3_test[..., 2] = (X_test[..., 1] + X_test[..., 1]) / 2.0\n",
+    "print(X3_test.shape)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "p0ATrRQ0DXst",
+    "outputId": "7bd8b557-774e-4028-d787-f68acfa00750"
+   },
+   "outputs": [],
+   "source": [
+    "print(X_val.shape)\n",
+    "X3_val = np.zeros((X_val.shape[0], X_val.shape[1], X_val.shape[2], X_val.shape[3]+1))\n",
+    "X3_val[..., 0] = X_val[..., 0]\n",
+    "X3_val[..., 1] = X_val[..., 1]\n",
+    "X3_val[..., 2] = (X_val[..., 1] + X_val[..., 1]) / 2.0\n",
+    "print(X3_val.shape)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "cgdsx7J2DXZh",
+    "outputId": "63574de9-1c12-47c2-ab42-cb8b18926f21"
+   },
+   "outputs": [],
+   "source": [
+    "print(X_train.shape)\n",
+    "X3_train = np.zeros((X_train.shape[0], X_train.shape[1], X_train.shape[2], X_train.shape[3]+1))\n",
+    "X3_train[..., 0] = X_train[..., 0]\n",
+    "X3_train[..., 1] = X_train[..., 1]\n",
+    "X3_train[..., 2] = (X_train[..., 1] + X_train[..., 1]) / 2.0\n",
+    "print(X3_train.shape)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "A37oL01ORwD0"
+   },
+   "source": [
+    "**Further preprocessing found to not be necessary.** We thought about trying to preprocess the data in the exact way expected by VGG-16 (subtracting average value from each pixel) and rescaling the image from 39 x 100 to 228 x 228 but this is expected to have minimal effect. We see below that exceptional performance is already obtained without those additional steps."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "49QGFaXPjvq9"
+   },
+   "outputs": [],
+   "source": [
+    "# load pre-trained model from keras\n",
+    "from tensorflow.keras.applications import VGG16\n",
+    "\n",
+    "conv_base = VGG16(weights='imagenet',\n",
+    "                  include_top=False,\n",
+    "                  input_shape=(X3_train.shape[1], X3_train.shape[2], 3))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "9z_qki7Qkd0Z",
+    "outputId": "14d7f4ab-8e08-454d-fb7c-be27ff74b0d6"
+   },
+   "outputs": [],
+   "source": [
+    "# print summary of convolutional base\n",
+    "conv_base.summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "W7PAB2ppD7by"
+   },
+   "outputs": [],
+   "source": [
+    "conv_base.trainable = False"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "sp7qJXi-FiAb",
+    "outputId": "30ad1efc-be98-4389-c65a-d5abd771126b"
+   },
+   "outputs": [],
+   "source": [
+    "model = tf.keras.models.Sequential()\n",
+    "\n",
+    "# add convolutional base as layer \n",
+    "model.add(conv_base)\n",
+    "\n",
+    "model.add(tf.keras.layers.Flatten()) \n",
+    "model.add(tf.keras.layers.Dense(256, activation='relu'))\n",
+    "model.add(tf.keras.layers.Dense(1,activation=\"sigmoid\"))\n",
+    "\n",
+    "# display model summary\n",
+    "model.summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "UYQjtyk2Gm3i"
+   },
+   "outputs": [],
+   "source": [
+    "opt_rms = tf.keras.optimizers.RMSprop(lr=2e-5, decay=1e-6) # this is much smaller lr than previous lr=0.01\n",
+    "model.compile(loss='binary_crossentropy', optimizer='RMSprop', metrics=['accuracy'])\n",
+    "batch_size = 64\n",
+    "epochs = 75"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "h4iN811zGoXr",
+    "outputId": "ec50f4d6-3a25-4d28-afbe-8e53821fd060"
+   },
+   "outputs": [],
+   "source": [
+    "%%time \n",
+    "\n",
+    "history = model.fit(X3_train, y_train, batch_size=batch_size, \n",
+    "                                  epochs=epochs,\n",
+    "                                  verbose=1,\n",
+    "                                  validation_data=(X3_val, y_val))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 356
+    },
+    "id": "eVwgdiTRItnS",
+    "outputId": "7a445f2e-1266-4377-866b-b9aa67dd97c1"
+   },
+   "outputs": [],
+   "source": [
+    "plot_history(history)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "8LdYTv9ZIusV",
+    "outputId": "35fc48bf-4789-4fd8-e734-100506f6ef48"
+   },
+   "outputs": [],
+   "source": [
+    "test_loss, test_accuracy = model.evaluate(X3_test, y_test, batch_size=128, verbose=2)\n",
+    "print('Accuracy on test dataset:', test_accuracy)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "QcCr6wf0SmIV"
+   },
+   "source": [
+    "VGG-16 using only training of the classifier head gives exceptional performance. The validation curves are smooth (unlike the case for the CIFAR-10 style fit), which gives confidence in the result. There is no evidence of overfitting. The accuracy on the test data set is 0.993."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "54AKr3hfTQlA"
+   },
+   "source": [
+    "**Fine tuning not required since obtained accuracy is sufficient.** The next step would be to try fine tuning, i.e., continuing the preceding fit but releasing also the top layer weights in the VGG-16, and using an even smaller learning rate. However, this is seen to be not necessary."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "W6547ciFaBCy"
+   },
+   "source": [
+    "**Conclusions**"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "hWkvfTA7aHFI"
+   },
+   "source": [
+    "We found that the CIFAR-10 style CNN (with 35,809 trainable parameters,  compared to our training set size of 1,949) did not give trustworthy results with either the larger or smaller learning rate as evidenced by the extreme varibility in the validation accuracy and loss curves. However, a transfer learning approach using the VGG-16 CNN model as the base (Total params: 15,108,417; Trainable params: 393,729) gave exceptionally smooth and good results, with an accuracy on the test data set of 0.998. This again affirms the transfer learning method and its facile and broad applicability across diverse fields."
+   ]
+  }
+ ],
+ "metadata": {
+  "accelerator": "GPU",
+  "colab": {
+   "collapsed_sections": [],
+   "name": "garold_murdachaew_gravitational_wave_project.ipynb",
+   "provenance": []
+  },
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
